@@ -1,0 +1,1370 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<script src="//d3js.org/d3.v3.min.js"></script>
+		<style type="text/css">
+		body{
+		background-color : lightblue;
+		}
+			.row {
+				position : relative;
+			}
+			.column {
+				float: left;
+				padding: 10px;
+				width: 15%;		
+			}
+			.left,  {
+				width: 40%;
+				height : 550px;
+			}
+			.right{
+ 				position: absolute;
+				top:0;
+				right:0;
+				height : 550px;
+				width: 25%;		
+			}
+			.middle {
+				width: 65%;
+				height : 550px;
+			}
+			input, select, textarea,button, {
+				font-size: 20px;
+			}
+			label {font-size: 100%;  font-weight: bold;}
+			
+			.chart rect { fill: steelblue }
+			.axis path,
+			.axis line {
+				fill: none;
+				stroke: black;
+				shape-rendering: crispEdges;
+			}
+			.axis text {
+				font-family: sans-serif;
+				font-size: 11px;
+		</style>
+	</head>
+   <body onload="filename()" >
+	 <h1 align="center">Volume Raycaster</h1>
+	</br>
+	
+	<div  class = "row">  
+	<div class="column left" ></div>
+ 	<div class="column middle" >  
+	
+    <canvas width = "900" height = "700" id = "my_Canvas" style="border: 1px solid black";></canvas>
+	<script src="gl-matrix-min.js"></script>
+	<script src="//d3js.org/d3.v3.min.js"></script>
+    <script>	 
+	var  a = [0,0,0,0,0,0];
+	var v;
+	var type;
+	var volumeTexture = null;
+	var volumeTexture1 = null;
+	var colormapTex = null;
+	var fileRegex = /.*\/(\w+)_(\d+)x(\d+)x(\d+)_(\w+)\.*/;
+	var proj = null;
+	var camera = null;
+	var projView = null;
+	var tabFocused = true;
+	var newVolumeUpload = true;
+	var targetFrameTime = 32;
+	var samplingRate = 1.0;
+	var WIDTH = 640;
+	var HEIGHT = 480;
+	var x,y,z,px_val;
+	var f_name = [];
+	var vol_Dims ;
+	var vColormap;
+	const defaultEye = vec3.set(vec3.create(), 0.5, 0.5, 1.5);
+	const center = vec3.set(vec3.create(), 0.5, 0.5, 0.5);
+	const up = vec3.set(vec3.create(), 0.0, 1.0, 0.0);
+	var cubeStrip = [
+					1, 1, 0,
+					0, 1, 0,
+					1, 1, 1,
+					0, 1, 1,
+					0, 0, 1,
+					0, 1, 0,
+					0, 0, 0,
+					1, 1, 0,
+					1, 0, 0,
+					1, 1, 1,
+					1, 0, 1,
+					0, 0, 1,
+					1, 0, 0,
+					0, 0, 0
+					];
+	var vertices = [				
+					-0.5,0.5,  0.0,1.0,
+					-0.5,-0.5, 0.0,0.0,
+					0.5,0.5,  1.0,1.0,
+					0.5,-0.5,  1.0,0.0
+					];
+	indices = [0,1,2,1,2,3];
+	var volume1,colormaps,dimension;
+	var deltaX = 0;
+	var deltaY = 0;
+	document.addEventListener("keydown", checkKeyPressed, false);
+	function checkKeyPressed(e) {
+		if (e.keyCode === 39) {
+		
+			deltaX -= 0.5;
+		}
+		if (e.keyCode === 37) {
+		
+			deltaX += 0.5;
+		}
+		if (e.keyCode === 38) {
+			
+			deltaY -= 0.2;
+		}
+		if (e.keyCode === 40) {
+			
+			deltaY += 0.2;
+		}
+		if (e.keyCode === 107) {
+			
+			camera.zoom(5);
+		}
+		if (e.keyCode === 109) {
+			
+			camera.zoom(-5);
+		}
+		if (e.keyCode === 106) {
+			
+			camera.rotate([200.0, 550.0],[250.0, 550.0]);
+		}
+	}
+	
+	var canvas = document.getElementById('my_Canvas');
+	gl = canvas.getContext('webgl2');
+	gl.clearColor(1.0, 1.0, 1.0, 1.0);
+	gl.clear(gl.COLOR_BUFFER_BIT);
+	
+    function myFunction() {
+		deltaX = 0;
+		deltaY = 0;
+		a = [0,0,0,0,0,0];
+		v = document.getElementById("myFiles").value ;
+		type = document.getElementById("SelectType").value ;
+		dimension =  document.getElementById('SelectDim').value;
+		v =  document.getElementById("myFiles").value;
+		x =  parseFloat(document.getElementById('x').value);
+		y =  parseFloat(document.getElementById('y').value);		
+		z =  parseFloat(document.getElementById('z').value);
+		vColormap = document.getElementById("SelectColormap").value;	
+
+		camera = new ArcballCamera(defaultEye, center, up, 2, [WIDTH, HEIGHT]);
+		proj = mat4.perspective(mat4.create(), 60 * Math.PI / 180.0,WIDTH / HEIGHT, 0.1, 100);	
+		projView = mat4.create();
+		
+		var controller = new Controller();
+		controller.mousemove = function(prev, cur, evt) {
+		if (evt.buttons == 1) 
+		{		
+		camera.rotate(prev, cur);
+		} 
+		else if (evt.buttons == 2) 
+		{
+		camera.pan([cur[0] - prev[0], prev[1] - cur[1]]);
+		}
+		};
+		controller.wheel = function(amt) { camera.zoom(amt); };
+		controller.pinch = controller.wheel;
+		controller.twoFingerDrag = function(drag) { camera.pan(drag); };
+		document.addEventListener("keydown", function(evt) {
+			if (evt.key == "p") {
+				takeScreenShot = true;
+			}
+		});
+		controller.registerForCanvas(canvas);		
+		if(dimension == "3D")
+			{main();}
+		if(dimension == "2D")
+			{main2D();}
+		}    
+	function main(){
+		vol_Dims = [x,y,z];	
+		var vao = gl.createVertexArray();
+		gl.bindVertexArray(vao);
+		
+		var vbo = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+		
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cubeStrip), gl.STATIC_DRAW);
+		gl.enableVertexAttribArray(0);
+		gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+		
+		var vertexShaderSource =
+		`#version 300 es
+		layout(location=0) in vec3 pos;
+		uniform mat4 proj_view;
+		uniform vec3 eye_pos;
+		uniform vec3 volume_scale;
+		out vec3 vray_dir;
+		out vec3 transformed_eye;
+		
+		void main(void) {
+		vec3 volume_translation = vec3(0.5) - volume_scale * 0.5;
+		gl_Position = proj_view * vec4(pos* volume_scale  + volume_translation,1);
+		transformed_eye = (eye_pos - volume_translation) / volume_scale;
+		vray_dir = pos - transformed_eye;		
+		}`;
+
+		var fragmentShaderSource =
+		`#version 300 es
+		precision highp int;
+		precision highp float;
+		uniform highp sampler3D volume;
+		uniform highp sampler2D colormap;
+		uniform float dt_scale;
+		uniform ivec3 volume_dims;
+		in vec3 vray_dir;
+		in vec3 transformed_eye;
+		out vec4 color;
+		
+		vec2 intersect_box(vec3 orig, vec3 dir) 
+		{
+			const vec3 box_min = vec3(0);
+			const vec3 box_max = vec3(1);
+			vec3 inv_dir = 1.0 / dir;
+			vec3 tmin_tmp = (box_min - orig) * inv_dir;
+			vec3 tmax_tmp = (box_max - orig) * inv_dir;
+			vec3 tmin = min(tmin_tmp, tmax_tmp);
+			vec3 tmax = max(tmin_tmp, tmax_tmp);
+			float t0 = max(tmin.x, max(tmin.y, tmin.z));
+			float t1 = min(tmax.x, min(tmax.y, tmax.z));
+			return vec2(t0, t1);
+		}
+
+		float wang_hash(int seed) 
+		{
+			seed = (seed ^ 61) ^ (seed >> 16);
+			seed *= 9;
+			seed = seed ^ (seed >> 4);
+			seed *= 0x27d4eb2d;
+			seed = seed ^ (seed >> 15);
+			return float(seed % 2147483647) / float(2147483647);
+		}
+		float linear_to_srgb(float x) {
+			if (x <= 0.0031308f) {
+				return 12.92f * x;
+			}
+			return 1.055f * pow(x, 1.f / 2.4f) - 0.055f;
+		}
+		void main(void) {
+		vec3 ray_dir = normalize(vray_dir);
+		vec2 t_hit = intersect_box(transformed_eye, ray_dir);
+		if (t_hit.x > t_hit.y) {
+			discard;
+		}
+		t_hit.x = max(t_hit.x, 0.0);
+		vec3 dt_vec = 1.0 / (vec3(volume_dims) * abs(ray_dir));
+		float dt = dt_scale * min(dt_vec.x, min(dt_vec.y, dt_vec.z));
+		float offset = wang_hash(int(gl_FragCoord.x + 640.0 * gl_FragCoord.y));
+		vec3 p = transformed_eye + (t_hit.x +  dt) * ray_dir;
+		for (float t = t_hit.x; t < t_hit.y; t += dt) 
+		{
+			float val = texture(volume, p).r;
+			vec4 val_color = vec4(texture(colormap, vec2(val, 0.5)).rgb, val);
+		
+			val_color.a = 1.0 - pow(1.0 - val_color.a, dt_scale);
+			color.rgb += (1.0 - color.a) * val_color.a * val_color.rgb;
+			color.a += (1.0 - color.a) * val_color.a;
+			if (color.a >= 0.95) 
+			{
+				break;
+			}
+			p += ray_dir * dt;
+		}
+		color.r = linear_to_srgb(color.r);
+		color.g = linear_to_srgb(color.g);
+		color.b = linear_to_srgb(color.b);
+		}`;
+		
+		shader = new compileShader(gl, vertexShaderSource, fragmentShaderSource);
+		gl.useProgram(shader);		
+		
+		volume1 = gl.getUniformLocation(shader, "volume");
+		colormaps = gl.getUniformLocation(shader, "colormap");
+		var dt_scales = gl.getUniformLocation(shader, "dt_scale");
+
+		gl.uniform1i(volume1, 0);
+		gl.uniform1i(colormaps, 1);	
+		gl.uniform1f(dt_scales, 1.0);
+		
+		gl.enable(gl.CULL_FACE);
+		gl.cullFace(gl.FRONT);
+		gl.enable(gl.BLEND);
+		gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+		
+		var colormapImage = new Image();
+		colormapImage.src = "http://127.0.0.1:8080/VolumeRaycaster/Colormap/"+vColormap;
+		colormapImage.onload = function() {
+			var colormap = gl.createTexture();
+			gl.activeTexture(gl.TEXTURE1);
+			gl.bindTexture(gl.TEXTURE_2D, colormap);
+			gl.texStorage2D(gl.TEXTURE_2D, 1, gl.SRGB8_ALPHA8, 180, 1);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+			
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 180, 1,
+			gl.RGBA, gl.UNSIGNED_BYTE, colormapImage);			
+			selectVolume2D();			
+		};		
+	}
+	
+	
+	var selectVolume2D = function() {	
+		loadVolume(v, function(file, dataBuffer) {	
+		var min = dataBuffer[0];
+		var max = dataBuffer[0];
+
+		for(i=0;i<=dataBuffer.length;i++)
+			{
+				if(min > dataBuffer[i])
+					min = dataBuffer[i];
+				if(max < dataBuffer[i])
+					max = dataBuffer[i];
+			}
+		var buffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+		if(dimension == '2D')
+		{
+			z =1 ;
+		}
+		if(type == "int")
+		{
+			var m_LocalBuffer = new ArrayBuffer(x*y*z*4);
+			var m_LocalBuffer_int = new Uint8Array(m_LocalBuffer);		
+			for(i=0;i< x*y*z;i++)
+			{	
+				px_val = (255 * ((dataBuffer[i*4] - min) / (max - min)));
+				m_LocalBuffer_int[i] = px_val;
+				var m = Math.floor(px_val/51);			
+				a[m] = a[m] + 1;
+			}
+		}
+		if(type == "float")
+		{
+			var m_LocalBuffer = new ArrayBuffer(x*y*z);
+			var m_LocalBuffer_int = new Uint8Array(m_LocalBuffer);	
+			for(i=0;i< x*y*z;i++)
+			{	px_val = (255 * ((dataBuffer[i] - min) / (max - min)))
+				m_LocalBuffer_int[i] = px_val;
+				var m = Math.floor(px_val/51);
+				a[m] = a[m] + 1;
+				
+			}
+		}	
+		if(dimension == "2D")
+		{
+			var volume = gl.createTexture();
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, volume);
+			gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R8, vol_Dims[0],vol_Dims[1]);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);			
+			gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, vol_Dims[0],vol_Dims[1],gl.RED, gl.UNSIGNED_BYTE, m_LocalBuffer_int);	
+		}
+		if(dimension == "3D")
+		{
+			var volume = gl.createTexture();
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_3D, volume);
+			gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R8,vol_Dims[0],vol_Dims[1],vol_Dims[2]);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, 0, 0,x, y, z,gl.RED, gl.UNSIGNED_BYTE, m_LocalBuffer_int);
+		}
+			
+		var volDims = gl.getUniformLocation(shader, "volume_dims");
+		gl.uniform3iv(volDims, vol_Dims);
+		newVolumeUpload = true;
+		if (!volumeTexture) 
+		{
+			volumeTexture = volume;
+			setInterval(function() {			
+			var startTime = new Date();
+			gl.clearColor(1.0, 1.0, 1.0, 1.0);
+			gl.clear(gl.COLOR_BUFFER_BIT);
+			if (newVolumeUpload) 
+			{
+				camera = new ArcballCamera(defaultEye, center, up, 2, [WIDTH, HEIGHT]);
+				
+			}				
+			if(dimension == "2D")
+				var volScale = [0.5+deltaX, 0.5+deltaY,0.5];
+			else
+				var volScale = [0.5, 0.5,0.5];
+			var vsclae = gl.getUniformLocation(shader, "volume_scale");
+			gl.uniform3fv(vsclae, volScale);
+			projView = mat4.mul(projView, proj, camera.camera);
+			var proj_view1 = gl.getUniformLocation(shader, "proj_view");
+			gl.uniformMatrix4fv(proj_view1, false,projView);
+			var eye = [camera.invCamera[12], camera.invCamera[13], camera.invCamera[14]];
+			var eye_pos1 = gl.getUniformLocation(shader, "eye_pos");
+			gl.uniform3fv(eye_pos1, eye);
+			gl.clearColor(1.0,1.0,1.0, 1.0);
+			gl.clear(gl.COLOR_BUFFER_BIT);
+			if(dimension == "2D")
+			{
+				gl.drawElements(gl.TRIANGLES, indices.length,gl.UNSIGNED_SHORT,0);
+			}
+			if(dimension == "3D")
+			{
+				gl.drawArrays(gl.TRIANGLE_STRIP, 0, cubeStrip.length / 3);
+			}
+			gl.finish();
+			var endTime = new Date();
+			var renderTime = endTime - startTime;
+			var targetSamplingRate = renderTime / targetFrameTime;
+			newVolumeUpload = false;
+			startTime = endTime;
+			}, targetFrameTime);
+		} 
+		else 
+		{
+			gl.deleteTexture(volumeTexture);
+			volumeTexture = volume;
+		}
+		});
+	}
+
+	var loadVolume = function(file, onload) 
+	{	
+		var url = "http://127.0.0.1:8080/VolumeRaycaster/DataFiles/"+v;	
+		var req = new XMLHttpRequest();	
+		req.open("GET", url, true);
+		req.responseType = "arraybuffer";
+		req.onprogress = function (evt) 
+		{
+			  var load = 100*(evt.loaded / (x*y*z));
+		};
+		req.onerror = function(evt) 
+		{
+			console.log("no buffer?");
+		};
+		req.onload = function(evt) 
+		{	
+			var dataBuffer = req.response ;
+			if (dataBuffer) 
+			{	
+				if(type=="int")
+				{	
+					dataBuffer = new Uint8Array(dataBuffer);
+				}
+				else if (type == "float")
+				{	
+					dataBuffer = new Float32Array(dataBuffer);
+				}			
+				onload(file, dataBuffer);
+			} 
+			else 
+			{
+				alert("Unable to load buffer properly from volume?");
+				console.log("no buffer?");
+			}
+		};
+		req.send();
+	}	
+
+		/*
+		var selectVolume = function() {	
+		
+		loadVolume(v, function(file, dataBuffer) {
+		
+		
+		var min = dataBuffer[0];
+		var max = dataBuffer[0];
+
+		for(i=0;i<=dataBuffer.length;i++)
+		{
+			if(min > dataBuffer[i])
+				min = dataBuffer[i];
+			if(max < dataBuffer[i])
+				max = dataBuffer[i];
+		}
+		if(dimension == '2D')
+		{
+		z =1 ;
+		}
+		if(type == "int")
+		{
+		var m_LocalBuffer = new ArrayBuffer(x*y*z*4);
+		var m_LocalBuffer_int = new Uint8Array(m_LocalBuffer);	
+		for(i=0;i< x*y*z;i++)
+		{	var num = i*4;
+			m_LocalBuffer_int[i] = (255 * ((dataBuffer[i*4] - min) / (max - min)));		
+		}
+		}
+		if(type == "float")
+		{
+		var m_LocalBuffer = new ArrayBuffer(x*y*z);
+		var m_LocalBuffer_int = new Uint8Array(m_LocalBuffer);	
+		for(i=0;i< x*y*z;i++)
+		{	
+			m_LocalBuffer_int[i] = (255 * ((dataBuffer[i] - min) / (max - min)));
+			
+			
+		}
+		}
+		
+		
+			var volume = gl.createTexture();
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_3D, volume);
+			gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R8,vol_Dims[0],vol_Dims[1],vol_Dims[2]);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, 0, 0,x, y, z,gl.RED, gl.UNSIGNED_BYTE, m_LocalBuffer_int);
+			
+			//gl.uniform3iv(shader.uniforms["volume_dims"], volDims);
+			var volDims = gl.getUniformLocation(shader, "volume_dims");
+			gl.uniform3iv(volDims, vol_Dims);
+			
+			var volScale = [1.0, 1.0,1.0];
+			//gl.uniform3fv(shader.uniforms["volume_scale"], volScale);
+			var vsclae = gl.getUniformLocation(shader, "volume_scale");
+			gl.uniform3fv(vsclae, volScale);
+			newVolumeUpload = true;
+			if (!volumeTexture1) {
+				volumeTexture1 = volume;
+				setInterval(function() {
+				
+					var startTime1 = new Date();
+					gl.clearColor(1.0, 1.0, 1.0, 1.0);
+					gl.clear(gl.COLOR_BUFFER_BIT);
+
+					// Reset the sampling rate and camera for new volumes
+				if (newVolumeUpload) {
+						camera = new ArcballCamera(defaultEye, center, up, 2, [WIDTH, HEIGHT]);
+						samplingRate = 1.0;
+						var vsamplingRate = gl.getUniformLocation(shader, "dt_scale");
+						gl.uniform1f(vsamplingRate, samplingRate);
+					}
+					projView = mat4.mul(projView, proj, camera.camera);
+					var proj_view1 = gl.getUniformLocation(shader, "proj_view");
+					
+					gl.uniformMatrix4fv(proj_view1, false,projView);
+			
+					//gl.uniformMatrix4fv(shader.uniforms["proj_view"], false, projView);
+
+					var eye = [camera.invCamera[12], camera.invCamera[13], camera.invCamera[14]];
+					//gl.uniform3fv(shader.uniforms["eye_pos"], eye);
+					var eye_pos1 = gl.getUniformLocation(shader, "eye_pos");
+					
+					gl.uniform3fv(eye_pos1, eye);
+					gl.drawArrays(gl.TRIANGLE_STRIP, 0, cubeStrip.length / 3);
+					// Wait for rendering to actually finish
+					gl.finish();
+					var endTime1 = new Date();
+					var renderTime = endTime1 - startTime1;
+					var targetSamplingRate = renderTime / targetFrameTime;
+
+					if (!newVolumeUpload && targetSamplingRate > samplingRate) {
+						samplingRate = 0.8 * samplingRate + 0.2 * targetSamplingRate;
+					//	gl.uniform1f(shader.uniforms["dt_scale"], samplingRate);
+						var vsamplingRate = gl.getUniformLocation(shader, "dt_scale");
+						gl.uniform1f(vsamplingRate, samplingRate);
+					}
+
+					newVolumeUpload = false;
+					startTime1 = endTime1;
+				}, targetFrameTime);
+			} else {
+				gl.deleteTexture(volumeTexture1);
+				volumeTexture1 = volume;
+			}
+			
+		
+		
+		
+		
+		
+				});
+		}
+
+			*/
+	function main2D(){
+		vol_Dims = [x,y,1];
+		
+		var vao = gl.createVertexArray();
+		gl.bindVertexArray(vao);
+
+		var vbo = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+		
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+		
+		var Index_Buffer = gl.createBuffer();
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, Index_Buffer);         
+		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+		gl.enableVertexAttribArray(0);
+		gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 4*4, 0);	
+		gl.enableVertexAttribArray(1);
+		gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 4*4, 2*4);
+			
+		var vertexShaderSource =
+			`#version 300 es
+			layout(location=0) in vec2 pos;
+			layout(location=1) in vec2 texCoord;
+			out vec2 v_texCoord;
+			uniform mat4 proj_view;
+			uniform vec3 eye_pos;
+			uniform vec3 volume_scale;
+			void main(void) {
+			vec3 volume_translation = vec3(0.75) - volume_scale * 0.75;
+			
+			gl_Position =  proj_view*vec4(vec3(pos,0.0)  + volume_translation, 1.0);		
+			v_texCoord = texCoord ;
+			}`;
+
+
+		var fragmentShaderSource =
+			`#version 300 es
+			precision highp int;
+			precision highp float;
+			uniform highp sampler2D volume;
+			uniform highp sampler2D colormap;
+			uniform float dt_scale;
+			uniform ivec3 volume_dims;		
+			in vec2 v_texCoord;
+			out vec4 color;
+			
+			void main(void) 
+			{
+
+			float val = texture(volume, v_texCoord).r;
+			color = vec4(texture(colormap, vec2(val, 0.5)).rgb, 1.0);
+			}`;
+			
+		shader = new compileShader(gl, vertexShaderSource, fragmentShaderSource);
+		gl.useProgram(shader);
+			
+		volume1 = gl.getUniformLocation(shader, "volume");
+		colormaps = gl.getUniformLocation(shader, "colormap");
+		var dt_scales = gl.getUniformLocation(shader, "dt_scale");
+
+		gl.uniform1i(volume1, 0);
+		gl.uniform1i(colormaps, 1);	
+		gl.uniform1f(dt_scales, 1.0);
+		
+		gl.enable(gl.BLEND);
+		gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+			
+		var colormapImage = new Image();
+		colormapImage.src = "http://127.0.0.1:8080/VolumeRaycaster/Colormap/"+vColormap;
+		colormapImage.onload = function() {
+			var colormap = gl.createTexture();
+			gl.activeTexture(gl.TEXTURE1);
+			gl.bindTexture(gl.TEXTURE_2D, colormap);
+			gl.texStorage2D(gl.TEXTURE_2D, 1, gl.SRGB8_ALPHA8, 180, 1);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+			
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 180, 1,
+			gl.RGBA, gl.UNSIGNED_BYTE, colormapImage);		
+			selectVolume2D();
+		};
+			
+	}      
+			 
+		
+	function drawTriangles()
+	{	
+		if(dimension == "2D")
+			{
+				gl.drawElements(gl.TRIANGLES, indices.length,gl.UNSIGNED_SHORT,0);
+			}
+		if(dimension == "3D")
+			{
+				gl.drawArrays(gl.TRIANGLE_STRIP, 0, cubeStrip.length / 3);
+			}
+	}
+
+
+	var ArcballCamera = function(eye, center, up, zoomSpeed, screenDims) 
+	{
+		var veye = vec3.set(vec3.create(), eye[0], eye[1], eye[2]);
+		var vcenter = vec3.set(vec3.create(), center[0], center[1], center[2]);
+		var vup = vec3.set(vec3.create(), up[0], up[1], up[2]);
+		vec3.normalize(vup, vup);
+
+		var zAxis = vec3.sub(vec3.create(), vcenter, veye);
+		var viewDist = vec3.len(zAxis);
+		vec3.normalize(zAxis, zAxis);
+
+		var xAxis = vec3.cross(vec3.create(), zAxis, vup);
+		vec3.normalize(xAxis, xAxis);
+
+		var yAxis = vec3.cross(vec3.create(), xAxis, zAxis);
+		vec3.normalize(yAxis, yAxis);
+
+		vec3.cross(xAxis, zAxis, yAxis);
+		vec3.normalize(xAxis, xAxis);
+
+		this.zoomSpeed = zoomSpeed;
+		this.invScreen = [1.0 / screenDims[0], 1.0 / screenDims[1]];
+
+		this.centerTranslation = mat4.fromTranslation(mat4.create(), center);
+		mat4.invert(this.centerTranslation, this.centerTranslation);
+
+		var vt = vec3.set(vec3.create(), 0, 0, -1.0 * viewDist);
+		this.translation = mat4.fromTranslation(mat4.create(), vt);
+
+		var rotMat = mat3.fromValues(xAxis[0], xAxis[1], xAxis[2],
+			yAxis[0], yAxis[1], yAxis[2],
+			-zAxis[0], -zAxis[1], -zAxis[2]);
+		mat3.transpose(rotMat, rotMat);
+		this.rotation = quat.fromMat3(quat.create(), rotMat);
+		quat.normalize(this.rotation, this.rotation);
+		this.camera = mat4.create();
+		this.invCamera = mat4.create();
+		this.updateCameraMatrix();
+	}
+
+	ArcballCamera.prototype.rotate = function(prevMouse, curMouse) {
+		var mPrev = vec2.set(vec2.create(),
+			clamp(prevMouse[0] * 2.0 * this.invScreen[0] - 1.0, -1.0, 1.0),
+			clamp(1.0 - prevMouse[1] * 2.0 * this.invScreen[1], -1.0, 1.0));
+
+		var mCur = vec2.set(vec2.create(),
+			clamp(curMouse[0] * 2.0 * this.invScreen[0] - 1.0, -1.0, 1.0),
+			clamp(1.0 - curMouse[1] * 2.0 * this.invScreen[1], -1.0, 1.0));
+
+		var mPrevBall = screenToArcball(mPrev);
+		var mCurBall = screenToArcball(mCur);
+		
+		this.rotation = quat.mul(this.rotation, mPrevBall, this.rotation);
+		this.rotation = quat.mul(this.rotation, mCurBall, this.rotation);
+
+		this.updateCameraMatrix();
+	}
+
+	ArcballCamera.prototype.kb_rotate = function()
+	{	
+		this.rotation += [0.005,-0.005,-0.005,-0.99] ;
+		this.updateCameraMatrix();
+	}
+
+	var clamp = function(a, min, max) {
+		return a < min ? min : a > max ? max : a;
+	}
+
+	var screenToArcball = function(p) {
+		var dist = vec2.dot(p, p);
+		if (dist <= 1.0) 
+		{
+			return quat.set(quat.create(), p[0], p[1], Math.sqrt(1.0 - dist), 0);
+		} 
+		else 
+		{
+			var unitP = vec2.normalize(vec2.create(), p);
+			return quat.set(quat.create(), unitP[0], unitP[1], 0, 0);
+		}
+	}
+	ArcballCamera.prototype.zoom = function(amount) {
+		var vt = vec3.set(vec3.create(), 0.0, 0.0, amount * this.invScreen[1] * this.zoomSpeed);
+		var t = mat4.fromTranslation(mat4.create(), vt);
+		this.translation = mat4.mul(this.translation, t, this.translation);
+		if (this.translation[14] >= -0.2) {
+			this.translation[14] = -0.2;
+		}
+		this.updateCameraMatrix();
+	}
+	//---------------SHADER--------------------------------------------------
+	var Shader = function(gl, vertexSrc, fragmentSrc) {
+		var self = this;
+		this.program = compileShader(gl, vertexSrc, fragmentSrc);
+
+		var regexUniform = /uniform[^;]+[ ](\w+);/g
+		var matchUniformName = /uniform[^;]+[ ](\w+);/
+
+		this.uniforms = {};
+
+		var vertexUnifs = vertexSrc.match(regexUniform);
+		var fragUnifs = fragmentSrc.match(regexUniform);
+
+		if (vertexUnifs) 
+		{
+			vertexUnifs.forEach(function(unif) 
+			{
+				var m = unif.match(matchUniformName);
+				self.uniforms[m[1]] = -1;
+			});
+		}
+		if (fragUnifs) 
+		{
+			fragUnifs.forEach(function(unif) 
+			{
+				var m = unif.match(matchUniformName);
+				self.uniforms[m[1]] = -1;
+			});
+		}
+
+		for (var unif in this.uniforms) 
+		{
+			this.uniforms[unif] = gl.getUniformLocation(this.program, unif);
+		}
+	}
+
+	Shader.prototype.use = function(gl) 
+	{
+		gl.useProgram(this.program);
+	}
+
+	var compileShader = function(gl, vert, frag)
+	{
+		var vs = gl.createShader(gl.VERTEX_SHADER);
+		gl.shaderSource(vs, vert);
+		gl.compileShader(vs);
+		if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS))
+		{
+			alert("Vertex shader failed to compile, see console for log");
+			console.log(gl.getShaderInfoLog(vs));
+			return null;
+		}
+
+		var fs = gl.createShader(gl.FRAGMENT_SHADER);
+		gl.shaderSource(fs, frag);
+		gl.compileShader(fs);
+		if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS))
+		{
+			alert("Fragment shader failed to compile, see console for log");
+			console.log(gl.getShaderInfoLog(fs));
+			return null;
+		}
+
+		var program = gl.createProgram();
+		gl.attachShader(program, vs);
+		gl.attachShader(program, fs);
+		gl.linkProgram(program);
+		if (!gl.getProgramParameter(program, gl.LINK_STATUS))
+		{
+			alert("Shader failed to link, see console for log");
+			console.log(gl.getProgramInfoLog(program));
+			return null;
+		}
+		return program;
+	}
+
+
+	ArcballCamera.prototype.updateCameraMatrix = function() 
+	{
+		var rotMat = mat4.fromQuat(mat4.create(), this.rotation);
+		this.camera = mat4.mul(this.camera, rotMat, this.centerTranslation);
+		this.camera = mat4.mul(this.camera, this.translation, this.camera);
+		this.invCamera = mat4.invert(this.invCamera, this.camera);
+	}
+	//-------MouseMovement--------------
+	var Controller = function() 
+	{
+		this.mousemove = null;
+		this.press = null;
+		this.wheel = null;
+		this.twoFingerDrag = null;
+		this.pinch = null;
+	}
+
+	Controller.prototype.registerForCanvas = function(canvas) 
+	{
+		var prevMouse = null;
+		var mouseState = [false, false];
+		var self = this;
+		canvas.addEventListener("mousemove", function(evt) 
+		{
+			evt.preventDefault();
+			var rect = canvas.getBoundingClientRect();
+			var curMouse = [evt.clientX - rect.left, evt.clientY - rect.top];
+			if (!prevMouse) 
+			{
+				prevMouse = [evt.clientX - rect.left, evt.clientY - rect.top];
+			} 
+			else if (self.mousemove) 
+			{
+				self.mousemove(prevMouse, curMouse, evt);
+			}
+			prevMouse = curMouse;
+		});
+
+		canvas.addEventListener("mousedown", function(evt) 
+		{
+			evt.preventDefault();
+			var rect = canvas.getBoundingClientRect();
+			var curMouse = [evt.clientX - rect.left, evt.clientY - rect.top];
+			if (self.press) {
+				self.press(curMouse, evt);
+			}
+		});
+
+		canvas.addEventListener("wheel", function(evt) 
+		{
+			evt.preventDefault();
+			if (self.wheel) {
+				self.wheel(-evt.deltaY);
+			}
+		});
+
+		canvas.oncontextmenu = function (evt) 
+		{
+			evt.preventDefault();
+		};
+
+		var touches = {};
+		canvas.addEventListener("touchstart", function(evt) 
+		{
+			var rect = canvas.getBoundingClientRect();
+			evt.preventDefault();
+			for (var i = 0; i < evt.changedTouches.length; ++i) 
+			{
+				var t = evt.changedTouches[i];
+				touches[t.identifier] = [t.clientX - rect.left, t.clientY - rect.top];
+				if (evt.changedTouches.length == 1 && self.press) 
+				{
+					self.press(touches[t.identifier], evt);
+				}
+			}
+		});
+
+		canvas.addEventListener("touchmove", function(evt) 
+		{
+			evt.preventDefault();
+			var rect = canvas.getBoundingClientRect();
+			var numTouches = Object.keys(touches).length;
+			if (numTouches == 1) 
+			{
+				if (self.mousemove) 
+				{
+					var t = evt.changedTouches[0];
+					var prevTouch = touches[t.identifier];
+					var curTouch = [t.clientX - rect.left, t.clientY - rect.top];
+					evt.buttons = 1;
+					self.mousemove(prevTouch, curTouch, evt);
+				}
+			} 
+			else 
+			{
+				var curTouches = {};
+				for (var i = 0; i < evt.changedTouches.length; ++i) 
+				{
+					var t = evt.changedTouches[i];
+					curTouches[t.identifier] = [t.clientX - rect.left, t.clientY - rect.top];
+				}            
+				var oldTouches = [];
+				for (t in touches) 
+				{
+					if (!(t in curTouches)) 
+					{
+						curTouches[t] = touches[t];
+					}
+					oldTouches.push(touches[t]);
+				}
+
+				var newTouches = [];
+				for (t in curTouches) 
+				{
+					newTouches.push(curTouches[t]);
+				}
+
+				var motionVectors = 
+				[vec2.set(vec2.create(), newTouches[0][0] - oldTouches[0][0],
+						newTouches[0][1] - oldTouches[0][1]),
+					vec2.set(vec2.create(), newTouches[1][0] - oldTouches[1][0],
+						newTouches[1][1] - oldTouches[1][1])
+				];
+				var motionDirs = [vec2.create(), vec2.create()];
+				vec2.normalize(motionDirs[0], motionVectors[0]);
+				vec2.normalize(motionDirs[1], motionVectors[1]);
+
+				var pinchAxis = vec2.set(vec2.create(), oldTouches[1][0] - oldTouches[0][0],
+					oldTouches[1][1] - oldTouches[0][1]);
+				vec2.normalize(pinchAxis, pinchAxis);
+
+				var panAxis = vec2.lerp(vec2.create(), motionVectors[0], motionVectors[1], 0.5);
+				vec2.normalize(panAxis, panAxis);
+
+				var pinchMotion = [
+					vec2.dot(pinchAxis, motionDirs[0]),
+					vec2.dot(pinchAxis, motionDirs[1])
+				];
+				var panMotion = [
+					vec2.dot(panAxis, motionDirs[0]),
+					vec2.dot(panAxis, motionDirs[1])
+				];
+
+				
+				if (self.pinch && Math.abs(pinchMotion[0]) > 0.5 && Math.abs(pinchMotion[1]) > 0.5
+					&& Math.sign(pinchMotion[0]) != Math.sign(pinchMotion[1]))
+				{
+					
+					var oldDist = pointDist(oldTouches[0], oldTouches[1]);
+					var newDist = pointDist(newTouches[0], newTouches[1]);
+					self.pinch(newDist - oldDist);
+				} else if (self.twoFingerDrag && Math.abs(panMotion[0]) > 0.5 && Math.abs(panMotion[1]) > 0.5
+					&& Math.sign(panMotion[0]) == Math.sign(panMotion[1]))
+				{              
+					var panAmount = vec2.lerp(vec2.create(), motionVectors[0], motionVectors[1], 0.5);
+					panAmount[1] = -panAmount[1];
+					self.twoFingerDrag(panAmount);
+				}
+			}
+
+			for (var i = 0; i < evt.changedTouches.length; ++i) 
+			{
+				var t = evt.changedTouches[i];
+				touches[t.identifier] = [t.clientX - rect.left, t.clientY - rect.top];
+			}
+		});
+
+		var touchEnd = function(evt) 
+		{
+			evt.preventDefault();
+			for (var i = 0; i < evt.changedTouches.length; ++i) {
+				var t = evt.changedTouches[i];
+				delete touches[t.identifier];
+			}
+		}
+		canvas.addEventListener("touchcancel", touchEnd);
+		canvas.addEventListener("touchend", touchEnd);
+	}
+
+	ArcballCamera.prototype.pan = function(mouseDelta) 
+	{
+		var delta = vec4.set(vec4.create(), mouseDelta[0] * this.invScreen[0] * Math.abs(this.translation[14]),
+			mouseDelta[1] * this.invScreen[1] * Math.abs(this.translation[14]), 0, 0);
+		var worldDelta = vec4.transformMat4(vec4.create(), delta, this.invCamera);
+		var translation = mat4.fromTranslation(mat4.create(), worldDelta);
+		this.centerTranslation = mat4.mul(this.centerTranslation, translation, this.centerTranslation);
+		this.updateCameraMatrix();
+	}
+
+	//----------------------	
+
+
+		/*
+		var selectVolume2D = function() {	
+		
+		loadVolume2D(v, function(file, dataBuffer) {
+		
+		//var m = file.match(fileRegex);
+		//var volDims = [parseInt(m[2]), parseInt(m[3]), parseInt(m[4])];
+		
+		var min = dataBuffer[0];
+		var max = dataBuffer[0];
+
+		for(i=0;i<=dataBuffer.length;i++)
+		{
+			if(min > dataBuffer[i])
+				min = dataBuffer[i];
+			if(max < dataBuffer[i])
+				max = dataBuffer[i];
+		}
+		
+		
+		if(type == "int")
+		{
+		var m_LocalBuffer = new ArrayBuffer(x*y*4);
+		var m_LocalBuffer_int = new Uint8Array(m_LocalBuffer);	
+		for(i=0;i< x*y;i++)
+		{	var num = i*4;
+			m_LocalBuffer_int[i] = (255 * ((dataBuffer[i*4] - min) / (max - min)));
+			
+			//m_LocalBuffer_int[i] = (255 * ((dataBuffer[i] - min) / (max - min)));
+			
+		}
+		}
+		if(type == "float")
+		{
+		var m_LocalBuffer = new ArrayBuffer(x*y);
+		var m_LocalBuffer_int = new Uint8Array(m_LocalBuffer);	
+		for(i=0;i< x*y;i++)
+		{	//var num = i*4;
+			m_LocalBuffer_int[i] = (255 * ((dataBuffer[i] - min) / (max - min)));
+			
+			
+		}
+		}
+			var volume = gl.createTexture();
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, volume);
+			gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R8, vol_Dims[0],vol_Dims[1]);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);		
+			gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, vol_Dims[0],vol_Dims[1],gl.RED, gl.UNSIGNED_BYTE, m_LocalBuffer_int);		
+			
+			//gl.uniform3iv(shader.uniforms["volume_dims"], volDims);
+			var volDims = gl.getUniformLocation(shader, "volume_dims");
+			gl.uniform3iv(volDims, vol_Dims);
+			
+			var volScale = [1.0, 1.0,1.0];
+			//gl.uniform3fv(shader.uniforms["volume_scale"], volScale);
+			var vsclae = gl.getUniformLocation(shader, "volume_scale");
+			gl.uniform3fv(vsclae, volScale);
+			newVolumeUpload = true;
+			if (!volumeTexture) {
+				volumeTexture = volume;
+				setInterval(function() {
+				
+					var startTime = new Date();
+					gl.clearColor(1.0, 1.0, 1.0, 1.0);
+					gl.clear(gl.COLOR_BUFFER_BIT);
+
+					// Reset the sampling rate and camera for new volumes
+				if (newVolumeUpload) {
+						camera = new ArcballCamera(defaultEye, center, up, 2, [WIDTH, HEIGHT]);
+						samplingRate = 1.0;
+						var vsamplingRate = gl.getUniformLocation(shader, "dt_scale");
+						gl.uniform1f(vsamplingRate, samplingRate);
+					}
+					projView = mat4.mul(projView, proj, camera.camera);
+					var proj_view1 = gl.getUniformLocation(shader, "proj_view");
+					
+					gl.uniformMatrix4fv(proj_view1, false,projView);
+			
+					//gl.uniformMatrix4fv(shader.uniforms["proj_view"], false, projView);
+
+					var eye = [camera.invCamera[12], camera.invCamera[13], camera.invCamera[14]];
+					//gl.uniform3fv(shader.uniforms["eye_pos"], eye);
+					var eye_pos1 = gl.getUniformLocation(shader, "eye_pos");
+					
+					gl.uniform3fv(eye_pos1, eye);
+					gl.drawArrays(gl.TRIANGLE_STRIP, 0, cubeStrip.length / 3);
+					// Wait for rendering to actually finish
+					gl.finish();
+					var endTime = new Date();
+					var renderTime = endTime - startTime;
+					var targetSamplingRate = renderTime / targetFrameTime;
+
+					if (!newVolumeUpload && targetSamplingRate > samplingRate) {
+						samplingRate = 0.8 * samplingRate + 0.2 * targetSamplingRate;
+					//	gl.uniform1f(shader.uniforms["dt_scale"], samplingRate);
+						var vsamplingRate = gl.getUniformLocation(shader, "dt_scale");
+						gl.uniform1f(vsamplingRate, samplingRate);
+					}
+
+					newVolumeUpload = false;
+					startTime = endTime;
+				}, targetFrameTime);
+			} else {
+				gl.deleteTexture(volumeTexture);
+				volumeTexture = volume;
+			}
+				});
+		}
+	*/
+	function filename()
+	{
+		var directory="http://127.0.0.1:8080/VolumeRaycaster/DataFiles/";
+		var xmlHttp = new XMLHttpRequest();
+		xmlHttp.open( "GET", directory, false ); // false for synchronous request
+		xmlHttp.send( null );
+		var ret=xmlHttp.responseText;
+		var fileList=ret.split('\n');
+		for(i=0;i<fileList.length;i++)
+		{
+			var fileinfo=fileList[i].split(' ');
+			if ( fileList[i].indexOf("a href") > 0  ) 
+			{
+				f_name.push(fileList[i].substring(fileList[i].indexOf(">",fileList[i].indexOf("a href"))+1,	fileList[i].indexOf("<",fileList[i].indexOf("a href"))));
+			}
+		}
+		var select = document.getElementById("myFiles");
+		for(index in f_name) 
+		{
+			if(f_name[index].indexOf(".raw") > 0)
+			{	 
+				select.options[select.options.length] = new Option(f_name[index], f_name[index]);
+			}
+		}
+	}	
+
+	function disable()
+	{
+		document.getElementById("myFiles").disabled=true;
+		document.getElementById("x").disabled=true;
+		document.getElementById("y").disabled=true;
+		document.getElementById("z").disabled=true;
+		document.getElementById("SelectType").disabled=true;document.getElementById("SelectDim").disabled=true;
+		document.getElementById("SelectColormap").disabled=true;
+	}
+		
+	function enable()
+	{
+		document.getElementById("myFiles").disabled=false;
+		document.getElementById("x").disabled=false;
+		document.getElementById("y").disabled=false;
+		document.getElementById("z").disabled=false;
+		document.getElementById("SelectType").disabled=false;document.getElementById("SelectDim").disabled=false;
+		document.getElementById("SelectColormap").disabled=false;
+	}
+	myFunction();//Starting point
+</script>
+</div>
+<div class="column right" id = "b" > 	
+	<form>
+		<table>
+			<tr>
+				 <td><label >File</label></td>
+				 <td><select id="myFiles">	
+					<option value="">Select</option>
+					</select></td>
+			</tr>
+			<tr></tr>
+			<tr></tr>
+			<tr>
+				<td><label >X</label></td>
+				<td> <input type="text" name="x" id = "x"></td>
+			</tr>
+			<tr></tr>
+			<tr></tr>
+			<tr>
+				<td><label>Y</label></td>
+				<td><input type="text" name="y" id = "y"></td> 
+			</tr>
+			<tr></tr>
+			<tr>
+				<td><label>Z</label></td>
+				<td><input type="text" name="z" id = "z"></td>
+			</tr>
+			<tr></tr>
+			<tr></tr>
+			<tr>
+				<td><label>Data type</label></td>
+				<td><select id="SelectType">	 
+					<option value="">Select</option>
+					<option value="int">Int</option>
+					<option value="float">Float</option>
+					</select>
+				</td>
+			</tr>
+			<tr></tr>
+			<tr></tr>
+			<tr>
+				<td><label>Dimension</label></td>
+				<td><select id="SelectDim">	 
+					<option value="">Select</option>
+					<option value="2D">2D</option>
+					<option value="3D">3D</option>
+					</select>
+				</td>
+			</tr>
+			<tr></tr>
+			<tr></tr>
+			<tr>
+				<td><label>Colormap</label></td>
+				<td><select id="SelectColormap">	 
+					<option value="rainbow.png">Rainbow</option>
+					<option value="samsel-linear-green.png">Samsel-linear-green</option>
+					<option value="cool-warm-paraview.png">Cool-warm-paraview</option>
+					<option value="matplotlib-plasma.png">Matplotlib-plasma</option>
+					<option value="matplotlib-virdis.png">Matplotlib-virdis</option>
+					<option value="samsel-linear-ygb-1211g.png">Samsel-linear-ygb-1211g</option>
+					</select>
+				</td>
+			</tr>
+			<tr></tr>
+			<tr></tr>
+			<tr></tr>
+			<tr></tr>
+			<tr>
+				<td> 
+					<button type="button" onclick="myFunction();disable();">Submit</button></td>
+					<td><button type="button" onclick="location.reload();enable();">Reset</button>
+					<button type="button" onclick="draw();">Show details</button>
+				</td>
+			</tr>
+	
+		</table>
+	</form>
+	</br>
+	</br>
+	</br>
+	</br>
+<script>
+function draw()
+{
+	var margin = 40;
+	var width = 330;
+	var height = 260;
+	var padding = 20;
+	var maximum = a[0];
+	var tickFormat = null;
+	for(var i = 1; i < a.length; i++) 
+	{
+		if(a[i]> maximum)
+		{
+			maximum = a[i];
+		}
+	}
+	var x = d3.scale.ordinal()
+	//.domain([0,25.5,51,76.5,102,127.5,123,178.5,204,229.5,255])
+	.domain([0,51,102,123,204,255])
+	.rangeBands([0,width]);
+
+	var y = d3.scale.linear()
+		.domain([0,maximum])
+		.range([height,0]);
+	d3.select("svg").remove();
+	var chart = d3.select("#b").append("svg").style('background','white');
+	chart.attr("width",width + 2* margin )
+		.attr("height",height + 2*margin)
+		.append("g")
+		.attr("transform","translate(" + 60+ "," + margin + ")")
+		.selectAll("rect")
+		.data(a)
+		.enter().append("rect")    
+		.attr("height", function(d, i) {return  height - y(d);})
+		.attr("width","19")
+		.attr("x",function(d,i) { return x(i*51) ; })
+		.attr("y",function(d) { return y(d); });
+		
+	var xAxis = d3.svg.axis()
+		.scale(x)
+		.orient("bottom")
+		.ticks(1);
+
+	var yAxis = d3.svg.axis()
+		.scale(y)
+		.orient("left")
+		.ticks(5);
+
+	chart.append("g")
+		.attr("transform", "translate(" + 60+ "," + (height+margin) + ")")
+		.attr("class","axis")
+		.call(xAxis);
+		
+	chart.append("g")
+		.attr("transform", "translate(" + 60+ "," + margin + ")")
+		.attr("class","axis")
+		.call(yAxis);
+
+	chart.append("text")
+		.attr("text-anchor", "middle")  
+		.attr("transform", "translate("+ (padding) +","+(height/2)+")rotate(-90)")
+		.text("Frequency");
+
+	chart.append("text")
+		.attr("text-anchor", "middle") 
+		.attr("transform", "translate("+ (width/2) +","+(height+80)+")") 
+		.text("Pixel values");			
+}	  
+</script>
+</div>
+</div>
+</body>
+</html>
