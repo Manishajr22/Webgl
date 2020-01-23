@@ -48,14 +48,14 @@
 		</style>
 	</head>
    <body onload="filename()" >
-	 <h1 align="center">Volume Raycaster</h1>
+	 
 	</br>
-	
+	</br>
 	<div  class = "row">  
 	<div class="column left" ></div>
  	<div class="column middle" >  
 	
-    <canvas width = "900" height = "700" id = "my_Canvas" style="border: 1px solid black";></canvas>
+    <canvas width = "700" height = "700" id = "my_Canvas" style="border: 1px solid black";></canvas>
 	<script src="gl-matrix-min.js"></script>
 	<script src="http://d3js.org/d3.v3.min.js"></script>
     <script>	 
@@ -82,6 +82,8 @@
 	const defaultEye = vec3.set(vec3.create(), 0.5, 0.5, 1.5);
 	const center = vec3.set(vec3.create(), 0.5, 0.5, 0.5);
 	const up = vec3.set(vec3.create(), 0.0, 1.0, 0.0);
+	var intensity = [];
+	var twodim = [];
 	var cubeStrip = [
 					1, 1, 0,
 					0, 1, 0,
@@ -149,13 +151,22 @@
 		deltaX = 0;
 		deltaY = 0;
 		a = [0,0,0,0,0,0];
-		v = document.getElementById("myFiles").value ;
-		type = document.getElementById("SelectType").value ;
+		var filedet = document.getElementById("myFiles").value ;
+		var fileinfo=filedet.split(' ');
+		v 			= fileinfo[0]+".raw";
+		dimension 	= fileinfo[1].toUpperCase();
+		type 		= fileinfo[2].toLowerCase();
+		x			= parseFloat(fileinfo[3]);
+		y			= parseFloat(fileinfo[4]);	
+		if(fileinfo.length > 5)
+		 {z			= parseFloat(fileinfo[5]);}
+		//}
+		/*type = document.getElementById("SelectType").value ;
 		dimension =  document.getElementById('SelectDim').value;
 		v =  document.getElementById("myFiles").value;
 		x =  parseFloat(document.getElementById('x').value);
 		y =  parseFloat(document.getElementById('y').value);		
-		z =  parseFloat(document.getElementById('z').value);
+		z =  parseFloat(document.getElementById('z').value);*/
 		vColormap = document.getElementById("SelectColormap").value;	
 
 		camera = new ArcballCamera(defaultEye, center, up, 2, [WIDTH, HEIGHT]);
@@ -319,19 +330,43 @@
 		};		
 	}
 	
+	function TwoDimensional(arr, size) 
+    {
+      var res = []; 
+      for(var i=0;i < arr.length;i = i+size)
+      res.push(arr.slice(i,i+size));
+	
+      return res;
+    }
 	
 	var selectVolume2D = function() {	
 		loadVolume(v, function(file, dataBuffer) {	
 		var min = dataBuffer[0];
 		var max = dataBuffer[0];
-
+		/*twodim = TwoDimensional(dataBuffer,x*4);
+		if(twodim.length>0)
+		{
+		for(r = 0; r < twodim.length; r++)
+		{
+			for(q = 0; q < twodim.length*4;q+4)
+			{
+			if (twodim[r][q]>=35)
+				intensity.push(1);
+			else	
+				intensity.push(0);
+			}
+		}
+		}*/
 		for(i=0;i<=dataBuffer.length;i++)
 			{
 				if(min > dataBuffer[i])
 					min = dataBuffer[i];
 				if(max < dataBuffer[i])
 					max = dataBuffer[i];
+					
+				
 			}
+	
 		var buffer = gl.createBuffer();
 		gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 		if(dimension == '2D')
@@ -1169,7 +1204,7 @@
 	*/
 	function filename()
 	{
-		var directory="http://127.0.0.1:8080/VolumeRaycaster/DataFiles/";
+		/*var directory="http://127.0.0.1:8080/VolumeRaycaster/DataFiles/";
 		var xmlHttp = new XMLHttpRequest();
 		xmlHttp.open( "GET", directory, false ); // false for synchronous request
 		xmlHttp.send( null );
@@ -1190,27 +1225,48 @@
 			{	 
 				select.options[select.options.length] = new Option(f_name[index], f_name[index]);
 			}
-		}
+		}*/
+		var directory="http://127.0.0.1:8080/VolumeRaycaster/Input.txt";
+		var xmlHttp = new XMLHttpRequest();
+		xmlHttp.open( "GET", directory, false ); 
+		xmlHttp.send( null );
+		var ret=xmlHttp.responseText;
+		var select = document.getElementById("myFiles");
+		{
+            if( ret != '' )
+            {
+                var txt = ret.split("\n");
+                for(index in txt)
+				{	
+					
+					select.options[select.options.length] = new Option(txt[index].substring(0,txt[index].indexOf(" ")), txt[index]);
+				}
+            }
+        }
+        //xmlHttp.send();
+		
 	}	
 
 	function disable()
 	{
 		document.getElementById("myFiles").disabled=true;
-		document.getElementById("x").disabled=true;
+		/*document.getElementById("x").disabled=true;
 		document.getElementById("y").disabled=true;
 		document.getElementById("z").disabled=true;
-		document.getElementById("SelectType").disabled=true;document.getElementById("SelectDim").disabled=true;
-		document.getElementById("SelectColormap").disabled=true;
+		document.getElementById("SelectType").disabled=true;
+		document.getElementById("SelectDim").disabled=true;*/
+		
 	}
 		
 	function enable()
 	{
 		document.getElementById("myFiles").disabled=false;
-		document.getElementById("x").disabled=false;
+		/*document.getElementById("x").disabled=false;
 		document.getElementById("y").disabled=false;
 		document.getElementById("z").disabled=false;
-		document.getElementById("SelectType").disabled=false;document.getElementById("SelectDim").disabled=false;
-		document.getElementById("SelectColormap").disabled=false;
+		document.getElementById("SelectType").disabled=false;
+		document.getElementById("SelectDim").disabled=false;*/
+		
 	}
 	myFunction();//Starting point
 </script>
@@ -1226,7 +1282,7 @@
 			</tr>
 			<tr></tr>
 			<tr></tr>
-			<tr>
+			<!--<tr>
 				<td><label >X</label></td>
 				<td> <input type="text" name="x" id = "x"></td>
 			</tr>
@@ -1264,7 +1320,7 @@
 				</td>
 			</tr>
 			<tr></tr>
-			<tr></tr>
+			<tr></tr>-->
 			<tr>
 				<td><label>Colormap</label></td>
 				<td><select id="SelectColormap">	 
